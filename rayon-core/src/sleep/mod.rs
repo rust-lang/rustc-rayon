@@ -286,6 +286,10 @@ impl Sleep {
             while *is_blocked {
                 is_blocked = sleep_state.condvar.wait(is_blocked).unwrap();
             }
+
+            // Drop `is_blocked` now in case `acquire_thread` blocks
+            drop(is_blocked);
+
             registry.acquire_thread();
         }
 
