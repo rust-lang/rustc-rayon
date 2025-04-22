@@ -26,6 +26,11 @@ pub(super) trait Job {
     unsafe fn execute(this: *const ());
 }
 
+#[derive(PartialEq, Eq, Hash, Copy, Clone, Debug)]
+pub(super) struct JobRefId {
+    pointer: usize,
+}
+
 /// Effectively a Job trait object. Each JobRef **must** be executed
 /// exactly once, or else data may leak.
 ///
@@ -54,11 +59,11 @@ impl JobRef {
         }
     }
 
-    /// Returns an opaque handle that can be saved and compared,
-    /// without making `JobRef` itself `Copy + Eq`.
     #[inline]
-    pub(super) fn id(&self) -> impl Eq {
-        (self.pointer, self.execute_fn)
+    pub(super) fn id(&self) -> JobRefId {
+        JobRefId {
+            pointer: self.pointer as usize,
+        }
     }
 
     #[inline]
@@ -102,8 +107,13 @@ where
         JobRef::new(self)
     }
 
-    pub(super) unsafe fn run_inline(self, stolen: bool) -> R {
-        self.func.into_inner().unwrap()(stolen)
+    pub(super) unsafe fn run_inline(&self, stolen: bool) {
+        let func = (*self.func.get()).take().unwrap();
+        (*self.result.get()) = match unwind::halt_unwinding(|| func(stolen)) {
+            Ok(x) => JobResult::Ok(x),
+            Err(x) => JobResult::Panic(x),
+        };
+        Latch::set(&self.latch);
     }
 
     pub(super) unsafe fn into_result(self) -> R {
@@ -136,7 +146,7 @@ where
 /// (Probably `StackJob` should be refactored in a similar fashion.)
 pub(super) struct HeapJob<BODY>
 where
-    BODY: FnOnce() + Send,
+    BODY: FnOnce(JobRefId) + Send,
 {
     job: BODY,
     tlv: Tlv,
@@ -144,7 +154,7 @@ where
 
 impl<BODY> HeapJob<BODY>
 where
-    BODY: FnOnce() + Send,
+    BODY: FnOnce(JobRefId) + Send,
 {
     pub(super) fn new(tlv: Tlv, job: BODY) -> Box<Self> {
         Box::new(HeapJob { job, tlv })
@@ -168,12 +178,13 @@ where
 
 impl<BODY> Job for HeapJob<BODY>
 where
-    BODY: FnOnce() + Send,
+    BODY: FnOnce(JobRefId) + Send,
 {
     unsafe fn execute(this: *const ()) {
+        let pointer = this as usize;
         let this = Box::from_raw(this as *mut Self);
         tlv::set(this.tlv);
-        (this.job)();
+        (this.job)(JobRefId { pointer });
     }
 }
 
@@ -181,14 +192,14 @@ where
 /// be turned into multiple `JobRef`s and called multiple times.
 pub(super) struct ArcJob<BODY>
 where
-    BODY: Fn() + Send + Sync,
+    BODY: Fn(JobRefId) + Send + Sync,
 {
     job: BODY,
 }
 
 impl<BODY> ArcJob<BODY>
 where
-    BODY: Fn() + Send + Sync,
+    BODY: Fn(JobRefId) + Send + Sync,
 {
     pub(super) fn new(job: BODY) -> Arc<Self> {
         Arc::new(ArcJob { job })
@@ -212,11 +223,12 @@ where
 
 impl<BODY> Job for ArcJob<BODY>
 where
-    BODY: Fn() + Send + Sync,
+    BODY: Fn(JobRefId) + Send + Sync,
 {
     unsafe fn execute(this: *const ()) {
+        let pointer = this as usize;
         let this = Arc::from_raw(this as *mut Self);
-        (this.job)();
+        (this.job)(JobRefId { pointer });
     }
 }
 

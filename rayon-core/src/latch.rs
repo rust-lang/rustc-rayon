@@ -3,6 +3,7 @@ use std::ops::Deref;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 
+use crate::job::JobRef;
 use crate::registry::{Registry, WorkerThread};
 
 /// We define various kinds of latches, which are all a primitive signaling
@@ -175,11 +176,6 @@ impl<'r> SpinLatch<'r> {
             cross: true,
             ..SpinLatch::new(thread)
         }
-    }
-
-    #[inline]
-    pub(super) fn probe(&self) -> bool {
-        self.core_latch.probe()
     }
 }
 
@@ -385,7 +381,12 @@ impl CountLatch {
         debug_assert!(old_counter != 0);
     }
 
-    pub(super) fn wait(&self, owner: Option<&WorkerThread>) {
+    pub(super) fn wait(
+        &self,
+        owner: Option<&WorkerThread>,
+        all_jobs_started: impl FnMut() -> bool,
+        is_job: impl FnMut(&JobRef) -> bool,
+    ) {
         match &self.kind {
             CountLatchKind::Stealing {
                 latch,
@@ -395,7 +396,9 @@ impl CountLatch {
                 let owner = owner.expect("owner thread");
                 debug_assert_eq!(registry.id(), owner.registry().id());
                 debug_assert_eq!(*worker_index, owner.index());
-                owner.wait_until(latch);
+                owner.wait_for_jobs::<_, true>(latch, all_jobs_started, is_job, |job| {
+                    owner.execute(job)
+                });
             },
             CountLatchKind::Blocking { latch } => latch.wait(),
         }

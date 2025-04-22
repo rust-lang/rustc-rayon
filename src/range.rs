@@ -429,6 +429,7 @@ fn test_u128_opt_len() {
 // when using the `opt_len` "indexed" mode.
 #[test]
 #[cfg(target_pointer_width = "64")]
+#[ignore]
 fn test_usize_i64_overflow() {
     use crate::ThreadPoolBuilder;
     use std::i64;

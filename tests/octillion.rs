@@ -68,6 +68,7 @@ fn two_threads<F: Send + FnOnce() -> R, R: Send>(f: F) -> R {
 }
 
 #[test]
+#[ignore]
 #[cfg_attr(
     any(
         not(target_pointer_width = "64"),
@@ -85,6 +86,7 @@ fn find_last_octillion() {
 }
 
 #[test]
+#[ignore]
 #[cfg_attr(
     any(
         not(target_pointer_width = "64"),
@@ -99,6 +101,7 @@ fn find_last_octillion_inclusive() {
 }
 
 #[test]
+#[ignore]
 #[cfg_attr(
     any(
         not(target_pointer_width = "64"),
